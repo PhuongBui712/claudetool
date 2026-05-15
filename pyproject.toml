@@ -1,0 +1,21 @@
+[project]
+name = "claudetool"
+version = "0.3.0"
+description = "Claude Code Session Manager — list, preview, setup, and delete sessions."
+readme = "README.md"
+authors = [
+    { name = "phuong712", email = "buitanphuong712@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+claudetool = "claudetool.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["claudetool*"]
+
+[build-system]
+requires = ["uv_build>=0.9.27,<0.10.0"]
+build-backend = "uv_build"
