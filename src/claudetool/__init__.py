@@ -2,40 +2,33 @@ from importlib.metadata import version as _version
 
 __version__ = _version("claudetool")
 
-# Modern Claude-inspired logo using Unicode box-drawing + sparkle motif
-# Rendered with warm orange/amber colors at display time
+# Pixel-art mascot: orange blob with cobalt-blue headphones, sleepy eyes,
+# four little legs. Each character row encodes 2 vertical pixels via ▀/▄/█.
 ASCII_LOGO = """\
-      \u2727
-   \u2727     \u2727
-     \u2727 \u2727       \u2501\u2501\u2501  claudetool
-   \u2727     \u2727
-      \u2727"""
+  ▄▄▀▀▀▀▀▀▀▀▄▄
+▄█▀▄████████▄▀█▄
+████▄▄████▄▄████
+ ██▀▀██▀▀██▀▀██"""
 
 
 # Colorized banner builder — called by cli.py and quickstart.py
 def render_logo(version: bool = True) -> str:
-    from claudetool.rendering import ORANGE, AMBER, DIM, PEACH, BOLD, RESET
+    from claudetool.rendering import ORANGE, BLUE, DIM, PEACH, BOLD, RESET
 
-    def orange(c):
-        return f"{BOLD}{ORANGE}{c}{RESET}"
-
-    def amber(c):
-        return f"{AMBER}{c}{RESET}"
-
-    def dim(c):
-        return f"{DIM}{c}{RESET}"
+    OR = ORANGE
+    BL = f"{BOLD}{BLUE}"
+    R = RESET
 
     lines = [
-        f"              {orange('╻')}",
-        f"           {amber('╲')}  {orange('╻')}  {amber('╱')}",
-        f"         {amber('╲')}  {amber('╲')} {orange('╻')} {amber('╱')}  {amber('╱')}",
-        f"  {dim('──')}  {dim('───')}{orange('╋')}{dim('───')}{orange('╸')}{dim('──')}        {BOLD}{ORANGE}claudetool{RESET}",
-        f"         {amber('╱')}  {amber('╱')} {orange('╹')} {amber('╲')}  {amber('╲')}",
-        f"           {amber('╱')}  {orange('╹')}  {amber('╲')}",
+        f"  {BL}▄▄▀▀▀▀▀▀▀▀▄▄{R}  ",
+        f"{BL}▄█▀{R}{OR}▄████████▄{R}{BL}▀█▄{R}",
+        f"{BL}██{R}{OR}██▄▄████▄▄██{R}{BL}██{R}",
+        f" {OR}██▀▀██▀▀██▀▀██{R} ",
     ]
 
     if version:
-        lines[4] += f"   {DIM}v{__version__}{RESET}"
-        lines[5] += f"      {PEACH}Session Manager for Claude Code{RESET}"
+        lines[1] += f"   {BOLD}{ORANGE}claudetool{R}"
+        lines[2] += f"   {DIM}v{__version__}{R}"
+        lines[3] += f"   {PEACH}Session Manager for Claude Code{R}"
 
     return "\n".join(lines)

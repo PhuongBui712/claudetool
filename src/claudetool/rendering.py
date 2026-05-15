@@ -29,6 +29,7 @@ ORANGE = "\033[38;5;208m"  # warm orange — primary brand accent
 AMBER = "\033[38;5;214m"  # lighter amber — highlights
 PEACH = "\033[38;5;216m"  # soft peach — subtle warmth
 WHITE = "\033[38;5;255m"  # bright white — text on dark bg
+BLUE = "\033[38;5;26m"  # cobalt blue — pixel-art headphones
 
 
 # ─────────────────────────────────────────────
