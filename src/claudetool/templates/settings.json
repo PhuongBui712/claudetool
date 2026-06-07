@@ -16,7 +16,6 @@
       "Bash(curl * | sh)",
       "Bash(wget * | bash)",
       "Bash(wget * | sh)",
-      "Bash(:(){ :|:& };:)",
       "Bash(dd if=* of=/dev/*)",
       "Bash(mkfs *)",
       "Bash(git push --force *)",
