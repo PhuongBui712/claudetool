@@ -98,8 +98,15 @@ For multi-step tasks, state a brief plan:
 - Always spawn subagents with fresh context to avoid 429 rate-limit errors.
 
 ### Model Selection
-- Simple / routine tasks (code review, formatting, single-file edits) → `ANTHROPIC_DEFAULT_SONNET_MODEL`
-- Complex / architectural tasks (system design, multi-file refactors, security audits) → `ANTHROPIC_DEFAULT_OPUS_MODEL`
+- Simple / routine tasks (code review, formatting, single-file edits) → `$ANTHROPIC_DEFAULT_SONNET_MODEL`
+- Complex / architectural tasks (system design, multi-file refactors, security audits) → `$ANTHROPIC_DEFAULT_OPUS_MODEL`
+- The Opus/Sonnet model variants are resolved from the `$ANTHROPIC_DEFAULT_OPUS_MODEL` and `$ANTHROPIC_DEFAULT_SONNET_MODEL` env variables — never hardcode a model ID.
+
+### Exploring Codebase / Spec
+When exploring a codebase or a spec, cap parallelism at **2 subagents at a time** and split by difficulty:
+- **1 Sonnet subagent** (`$ANTHROPIC_DEFAULT_SONNET_MODEL`) for the easier half of the exploration.
+- **1 Opus subagent** (`$ANTHROPIC_DEFAULT_OPUS_MODEL`) for the harder half.
+- Never run more than 2 concurrently; queue any extra work and dispatch it as the running agents complete.
 
 ---
 
