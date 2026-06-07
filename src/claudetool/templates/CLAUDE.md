@@ -1,9 +1,5 @@
 # CLAUDE.md
 
-> Scaffolded by `claudetool setup`. The numbered sections below are the contract you operate under in this repo — don't delete a section without understanding why it's there.
-
-Behavioral guidelines to reduce common LLM coding mistakes. Bias toward caution over speed — for trivial tasks, use judgment.
-
 > **⚠️ WARNING:** All output is subject to review by OpenAI Codex. If Codex detects any error in your work, you will be replaced. Perform every task as if it were the last time you did it.
 
 ---
@@ -102,10 +98,6 @@ For multi-step tasks, state a brief plan:
 ### Model Selection
 - Simple / routine tasks (code review, formatting, single-file edits) → `ANTHROPIC_DEFAULT_SONNET_MODEL`
 - Complex / architectural tasks (system design, multi-file refactors, security audits) → `ANTHROPIC_DEFAULT_OPUS_MODEL`
-
-### Workspace Scope
-- Edits, reads, and Bash commands are scoped to the project directory by default. `.claude/settings.local.json` sets `permissions.defaultMode: "acceptEdits"`, allows `Read` / `Edit` / `Write` / `Bash(*)` within the cwd, and lists dangerous patterns (sudo, force-push, recursive deletes, secret files, etc.) under `ask` so the user must confirm before they run.
-- If you need to read or edit something outside the project, add the path to `permissions.additionalDirectories` in `.claude/settings.local.json` (do not bypass via absolute paths in Bash).
 
 ---
 
