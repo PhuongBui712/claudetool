@@ -71,34 +71,18 @@ def build_parser() -> argparse.ArgumentParser:
     setup_p = sub.add_parser(
         "setup",
         help=(
-            "Scaffold .claude/settings.json, CLAUDE.md, "
-            ".claude/agents/, and tasks/ in the current project"
+            "Scaffold .claude/settings.local.json and CLAUDE.md in the project,\n"
+            "and install claudetool's global skills to ~/.claude/skills/"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
     setup_p.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite existing files (default: skip files that already exist)",
-    )
-    setup_p.add_argument(
-        "--with",
-        dest="with_",
-        metavar="CATS",
-        default=None,
         help=(
-            "Comma-separated extra agent categories to include alongside the\n"
-            "default set. Valid: python, security, beta, all\n"
-            "Examples:\n"
-            "  --with python\n"
-            "  --with python,security\n"
-            "  --with all"
+            "Overwrite existing files and remove deprecated scaffolding "
+            "(.claude/agents/, tasks/) from older versions"
         ),
-    )
-    setup_p.add_argument(
-        "--legacy",
-        action="store_true",
-        help="Use the V1 CLAUDE.md and the original 4-agent set (architect/coder/reviewer/tester)",
     )
 
     # ── delete ───────────────────────────────
