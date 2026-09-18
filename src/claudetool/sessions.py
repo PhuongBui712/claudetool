@@ -9,6 +9,7 @@ no argparse, and no template data.
 import os
 import re
 import json
+import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -220,13 +221,17 @@ def delete_sessions(sessions: list[dict], dry_run: bool = False) -> int:
     deleted = 0
     for s in sessions:
         path: Path = s["file"]
+        # Per-session artifacts (tool-results, etc.) live in a sibling <session_id>/ dir
+        side_dir = path.with_suffix("")
         label = s["custom_title"] or s["session_id"]
+        suffix = f" + {side_dir.name}/" if side_dir.is_dir() else ""
         if dry_run:
-            print(f"  [dry-run] Would delete: {label}  ({path.name})")
+            print(f"  [dry-run] Would delete: {label}  ({path.name}{suffix})")
         else:
             try:
                 path.unlink()
-                print(f"  {RED}Deleted{RESET}: {label}  ({path.name})")
+                shutil.rmtree(side_dir, ignore_errors=True)
+                print(f"  {RED}Deleted{RESET}: {label}  ({path.name}{suffix})")
                 deleted += 1
             except OSError as e:
                 print(f"  [error] Could not delete {path.name}: {e}")
