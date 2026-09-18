@@ -31,7 +31,7 @@ def cmd_quickstart(args) -> None:
 
     icons = ["\u25b8", "\u25b8", "\u25b8", "\u25b8", "\u25b8"]
     steps = [
-        ("claudetool setup", "Scaffold settings, CLAUDE.md, and agents"),
+        ("claudetool setup", "Scaffold settings and CLAUDE.md"),
         (f"claude --model {DEFAULT_OPUS_MODEL}", "Start a Claude Code session"),
         ("claudetool list", "See all sessions with cost estimates"),
         ("claudetool preview <id>", "Read back a session conversation"),
@@ -51,11 +51,7 @@ def cmd_quickstart(args) -> None:
         ("\u25b6", "preview", "Preview session messages in a scrollable pager"),
         ("\u2315", "search", "Full-text search across all sessions"),
         ("\u2261", "stats", "Token usage and cost summary per session"),
-        (
-            "\u2699",
-            "setup",
-            "Scaffold .claude/settings.json, CLAUDE.md, agents, tasks/",
-        ),
+        ("\u2699", "setup", "Scaffold settings + CLAUDE.md, install global skills"),
         ("\u2716", "delete", "Delete sessions by ID, title, or --all"),
         ("\u2727", "quickstart", "Show this getting-started guide"),
     ]
