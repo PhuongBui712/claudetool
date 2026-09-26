@@ -2,7 +2,8 @@
 Session data layer — parsing, listing, resolving, and deleting Claude Code sessions.
 
 This module handles the filesystem operations on JSONL session files stored
-under ``~/.claude/projects/<encoded-path>/``.  It contains no ANSI formatting,
+under ``<config dir>/projects/<encoded-path>/``
+(``$CLAUDE_CONFIG_DIR``, default ``~/.claude``).  It contains no ANSI formatting,
 no argparse, and no template data.
 """
 
@@ -14,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 
 from claudetool.rendering import RED, RESET
+from claudetool.templates import claude_config_dir
 
 
 # ─────────────────────────────────────────────
@@ -28,7 +30,7 @@ def encode_path(path: str) -> str:
 def get_project_sessions_dir(cwd: str | None = None) -> Path:
     cwd = cwd or os.getcwd()
     encoded = encode_path(cwd)
-    return Path.home() / ".claude" / "projects" / encoded
+    return claude_config_dir() / "projects" / encoded
 
 
 # ─────────────────────────────────────────────

@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
         "setup",
         help=(
             "Scaffold .claude/settings.local.json and CLAUDE.md in the project,\n"
-            "and install claudetool's global skills to ~/.claude/skills/"
+            "and install global skills to $CLAUDE_CONFIG_DIR/skills/ (default ~/.claude)"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )

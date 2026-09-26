@@ -66,7 +66,10 @@ def cmd_quickstart(args) -> None:
         ("Run {cmd}claudetool setup --force{end} to regenerate config files."),
         ("Use {cmd}claudetool search{end} to find conversations across all sessions."),
         ("Check {cmd}claudetool stats{end} to track token spend and model usage."),
-        ("Sessions are stored per-project under {dim}~/.claude/projects/{end}."),
+        (
+            "Sessions are stored under {dim}$CLAUDE_CONFIG_DIR/projects/{end}"
+            " (default {dim}~/.claude{end})."
+        ),
     ]
     for tip in tips:
         formatted = tip.format(cmd=CYAN, dim=DIM, end=RESET)
