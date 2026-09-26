@@ -1,6 +1,6 @@
 [project]
 name = "claudetool"
-version = "0.5.0"
+version = "0.6.0"
 description = "Claude Code Session Manager — list, preview, setup, and delete sessions."
 readme = "README.md"
 authors = [
