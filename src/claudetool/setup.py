@@ -99,13 +99,16 @@ def cmd_setup(args) -> None:
     removed = _remove_deprecated(cwd) if force else 0
     _install_skills()
 
+    skills = ", ".join(
+        f"/{p.parent.name}" for p in sorted(SKILLS_DIR.glob("*/SKILL.md"))
+    )
     print(f"\n{BOLD}Done.{RESET}", end="")
     if removed:
         print(f"  Removed {removed} deprecated file(s).", end="")
     print(
         f"\n  Commit {DIM}.claude/settings.local.json{RESET} and "
         f"{DIM}CLAUDE.md{RESET} to share config with your team.\n"
-        f"  Global skills: {DIM}/quick{RESET}, {DIM}/solution-propose{RESET}\n"
+        f"  Global skills: {DIM}{skills}{RESET}\n"
     )
     print(f"{DIM}Tip: start a session with:{RESET}")
     print(f"  claude --model {DEFAULT_OPUS_MODEL}\n")
