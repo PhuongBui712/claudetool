@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from claudetool.rendering import BOLD, GREEN, YELLOW, DIM, RESET
-from claudetool.templates import TEMPLATES_DIR, DEFAULT_OPUS_MODEL
+from claudetool.templates import TEMPLATES_DIR, DEFAULT_OPUS_MODEL, claude_config_dir
 
 
 # Files scaffolded by earlier versions; removed on `setup --force`.
@@ -33,9 +33,8 @@ DEPRECATED_AGENTS = (
 )
 DEPRECATED_TASKS = ("todo.md", "lessons.md")
 
-# Global skills owned by claudetool; installed to ~/.claude/skills/<name>/SKILL.md.
+# Global skills owned by claudetool; installed to <config dir>/skills/<name>/SKILL.md.
 SKILLS_DIR = TEMPLATES_DIR / "skills"
-USER_SKILLS_DIR = Path.home() / ".claude" / "skills"
 
 
 def _copy_file(src: Path, dst: Path, overwrite: bool, label: str) -> bool:
@@ -70,20 +69,20 @@ def _remove_deprecated(cwd: Path) -> int:
 
 def _install_skills() -> None:
     """Copy bundled skills into the user's global skills dir, touching nothing else."""
+    user_skills_dir = claude_config_dir() / "skills"
     for src in sorted(SKILLS_DIR.glob("*/SKILL.md")):
-        dst = USER_SKILLS_DIR / src.parent.name / "SKILL.md"
+        dst = user_skills_dir / src.parent.name / "SKILL.md"
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-        print(
-            f"  {GREEN}✓{RESET}  ~/.claude/skills/{src.parent.name}/SKILL.md  {DIM}[global]{RESET}"
-        )
+        print(f"  {GREEN}✓{RESET}  {dst}  {DIM}[global]{RESET}")
 
 
 def cmd_setup(args) -> None:
     cwd = Path(args.cwd or os.getcwd())
     force = args.force
 
-    print(f"\n{BOLD}Setting up Claude Code project in:{RESET} {cwd}\n")
+    print(f"\n{BOLD}Setting up Claude Code project in:{RESET} {cwd}")
+    print(f"  Config dir: {claude_config_dir()}\n")
 
     _copy_file(
         TEMPLATES_DIR / "settings.json",
