@@ -2,14 +2,29 @@
 Stats command — token usage and cost summary per session.
 """
 
+from __future__ import annotations
+
 import json
 from datetime import datetime
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from claudetool.rendering import BOLD, CYAN, DIM, GREEN, YELLOW, RED, RESET
-from claudetool.sessions import (
-    resolve_targets,
+from claudetool.rendering import (
+    BOLD,
+    CYAN,
+    DIM,
+    GREEN,
+    RED,
+    RESET,
+    YELLOW,
+    _fmt_cost,
 )
+from claudetool.sessions import list_subagents, resolve_targets
+
+if TYPE_CHECKING:
+    from argparse import Namespace
+    from pathlib import Path
+
+    from claudetool.sessions import Session
 
 
 # ─────────────────────────────────────────────
@@ -41,6 +56,13 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
 # Fallback for unknown models
 _DEFAULT_PRICING = MODEL_PRICING["sonnet"]
 
+_USAGE_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
 
 def _get_pricing(model: str) -> dict[str, float]:
     model_lower = model.lower()
@@ -58,73 +80,51 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
-def _fmt_cost(usd: float) -> str:
-    if usd < 0.01:
-        return f"${usd:.4f}"
-    return f"${usd:.2f}"
-
-
 # ─────────────────────────────────────────────
 # Token extraction from a session file
 # ─────────────────────────────────────────────
 
 
-def extract_session_usage(session_file: Path) -> dict:
-    """Parse a session JSONL and return aggregated token usage."""
-    totals = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "cache_read_input_tokens": 0,
-        "cache_creation_input_tokens": 0,
-    }
+def extract_session_usage(session_file: Path) -> dict[str, Any]:
+    """Parse a session JSONL and return aggregated token usage.
+
+    Claude Code writes one entry per content block, all sharing the API
+    response's `message.id` and `usage`, so each id is counted once.
+    """
+    totals = dict.fromkeys(_USAGE_KEYS, 0)
     by_model: dict[str, dict[str, int]] = {}
+    seen: set[str] = set()
 
     try:
-        with open(session_file, "r", encoding="utf-8") as f:
+        with open(session_file, "rb") as f:
             for line in f:
-                line = line.strip()
-                if not line:
+                if b'"usage"' not in line:
                     continue
                 try:
                     entry = json.loads(line)
-                except json.JSONDecodeError:
+                except ValueError:
                     continue
-
-                if entry.get("type") != "assistant":
+                if not isinstance(entry, dict) or entry.get("type") != "assistant":
                     continue
-
-                msg = entry.get("message", {})
+                msg = entry.get("message") or {}
                 usage = msg.get("usage")
                 if not usage:
                     continue
-
-                model = msg.get("model", "unknown")
-
-                inp = usage.get("input_tokens", 0)
-                out = usage.get("output_tokens", 0)
-                cread = usage.get("cache_read_input_tokens", 0)
-                cwrite = usage.get("cache_creation_input_tokens", 0)
-
-                totals["input_tokens"] += inp
-                totals["output_tokens"] += out
-                totals["cache_read_input_tokens"] += cread
-                totals["cache_creation_input_tokens"] += cwrite
-
-                if model not in by_model:
-                    by_model[model] = {
-                        "input_tokens": 0,
-                        "output_tokens": 0,
-                        "cache_read_input_tokens": 0,
-                        "cache_creation_input_tokens": 0,
-                        "requests": 0,
-                    }
-                by_model[model]["input_tokens"] += inp
-                by_model[model]["output_tokens"] += out
-                by_model[model]["cache_read_input_tokens"] += cread
-                by_model[model]["cache_creation_input_tokens"] += cwrite
-                by_model[model]["requests"] += 1
-
-    except (IOError, PermissionError):
+                msg_id = msg.get("id")
+                if msg_id:
+                    if msg_id in seen:
+                        continue
+                    seen.add(msg_id)
+                model = by_model.setdefault(
+                    msg.get("model", "unknown"), dict.fromkeys(_USAGE_KEYS, 0)
+                )
+                model.setdefault("requests", 0)
+                model["requests"] += 1
+                for key in _USAGE_KEYS:
+                    n = usage.get(key) or 0
+                    totals[key] += n
+                    model[key] += n
+    except OSError:
         pass
 
     return {"totals": totals, "by_model": by_model}
@@ -142,13 +142,16 @@ def compute_cost(usage: dict[str, int], model: str = "sonnet") -> float:
     return cost
 
 
-def get_session_total_cost(session_file: Path) -> float:
-    """Quick cost estimate for a single session (used in list view)."""
-    usage_data = extract_session_usage(session_file)
-    total_cost = 0.0
-    for model, model_usage in usage_data["by_model"].items():
-        total_cost += compute_cost(model_usage, model)
-    return total_cost
+def session_cost(session_file: Path, *, include_subagents: bool = True) -> float:
+    """Estimate a session's cost in USD, optionally adding its subagents."""
+    files = [session_file]
+    if include_subagents:
+        files += [sub.file for sub in list_subagents(session_file)]
+    return sum(
+        compute_cost(usage, model)
+        for f in files
+        for model, usage in extract_session_usage(f)["by_model"].items()
+    )
 
 
 # ─────────────────────────────────────────────
@@ -156,7 +159,7 @@ def get_session_total_cost(session_file: Path) -> float:
 # ─────────────────────────────────────────────
 
 
-def _print_usage_table(usage_data: dict, label: str) -> None:
+def _print_usage_table(usage_data: dict[str, Any], label: str) -> None:
     totals = usage_data["totals"]
     by_model = usage_data["by_model"]
 
@@ -214,7 +217,7 @@ def _print_usage_table(usage_data: dict, label: str) -> None:
 # ─────────────────────────────────────────────
 
 
-def cmd_stats(sessions: list[dict], args) -> None:
+def cmd_stats(sessions: list[Session], args: Namespace) -> None:
     since = None
     if args.since:
         try:
@@ -236,7 +239,7 @@ def cmd_stats(sessions: list[dict], args) -> None:
 
     # Date filter
     if since:
-        targets = [s for s in targets if s["created_at"] and s["created_at"] >= since]
+        targets = [s for s in targets if s["last_active"] >= since]
         if not targets:
             print(f"  {DIM}No sessions found since {args.since}{RESET}")
             return
@@ -245,9 +248,7 @@ def cmd_stats(sessions: list[dict], args) -> None:
         # Detailed single-session view
         s = targets[0]
         label = s["custom_title"] or s["session_id"][:16]
-        date_str = (
-            s["created_at"].strftime("%Y-%m-%d %H:%M") if s["created_at"] else "?"
-        )
+        date_str = s["last_active"].strftime("%Y-%m-%d %H:%M")
         usage_data = extract_session_usage(s["file"])
         _print_usage_table(usage_data, f"{label}  {DIM}({date_str}){RESET}")
     else:
