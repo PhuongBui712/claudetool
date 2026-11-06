@@ -5,31 +5,34 @@ This is the composition layer that wires together sessions, rendering,
 setup, and quickstart modules.
 """
 
-import os
+from __future__ import annotations
+
 import argparse
+import os
+import sys
+from typing import TYPE_CHECKING
 
 from claudetool import render_logo
+from claudetool.quickstart import cmd_quickstart
 from claudetool.rendering import (
     RED,
-    YELLOW,
     RESET,
+    YELLOW,
     print_sessions,
-    render_session_preview,
-    open_pager,
 )
+from claudetool.search import cmd_search
 from claudetool.sessions import (
-    list_sessions_filesystem,
-    parse_messages,
-    resolve_targets,
-    delete_sessions,
     confirm,
+    delete_sessions,
+    enrich_session,
+    list_sessions_filesystem,
+    resolve_targets,
 )
 from claudetool.setup import cmd_setup
-from claudetool.quickstart import cmd_quickstart
-from claudetool.search import cmd_search
-from claudetool.stats import cmd_stats, get_session_total_cost
-from claudetool.tui import run_interactive
+from claudetool.stats import cmd_stats
 
+if TYPE_CHECKING:
+    from claudetool.sessions import Session
 
 # ─────────────────────────────────────────────
 # Argument parser
@@ -59,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ── preview ──────────────────────────────
     pre_p = sub.add_parser(
         "preview",
-        help="Preview messages of a session in a scrollable pager (q to quit)",
+        help="Open a session in the transcript viewer",
     )
     pre_p.add_argument(
         "target",
@@ -119,7 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     # ── search ────────────────────────────────
     search_p = sub.add_parser(
         "search",
-        help="Full-text search across all sessions",
+        help="Full-text search across this project's sessions",
     )
     search_p.add_argument(
         "query",
@@ -166,11 +169,11 @@ def build_parser() -> argparse.ArgumentParser:
 # ─────────────────────────────────────────────
 
 
-def cmd_list(sessions, verbose):
+def cmd_list(sessions: list[Session], verbose: bool) -> None:
     print_sessions(sessions, verbose=verbose)
 
 
-def cmd_preview(sessions, args):
+def cmd_preview(sessions: list[Session], args: argparse.Namespace) -> None:
     matched = resolve_targets(sessions, [args.target])
     if not matched:
         print(f"{RED}No session matched:{RESET} {args.target}")
@@ -182,12 +185,13 @@ def cmd_preview(sessions, args):
         )
         print("Use a longer ID prefix to target a specific session.\n")
     session = matched[0]
-    messages = parse_messages(session["file"])
-    rendered = render_session_preview(session, messages)
-    open_pager(rendered)
+    # Deferred: keeps textual out of non-TUI commands.
+    from claudetool.tui import run_viewer  # noqa: PLC0415
+
+    run_viewer(session, args.cwd or os.getcwd())
 
 
-def cmd_delete(sessions, args):
+def cmd_delete(sessions: list[Session], args: argparse.Namespace) -> None:
     if not sessions:
         print("No sessions to delete.")
         return
@@ -219,9 +223,7 @@ def cmd_delete(sessions, args):
         f"\n{'[DRY RUN] ' if args.dry_run else ''}Sessions to delete ({len(targets)}):"
     )
     for s in targets:
-        date_str = (
-            s["created_at"].strftime("%Y-%m-%d %H:%M") if s["created_at"] else "?"
-        )
+        date_str = s["last_active"].strftime("%Y-%m-%d %H:%M")
         label = s["custom_title"] or f"(no title) {s['session_id'][:16]}\u2026"
         print(f"  \u2022 {label:<50}  {date_str}  {s['file_size_kb']} KB")
 
@@ -243,7 +245,7 @@ def cmd_delete(sessions, args):
 # ─────────────────────────────────────────────
 
 
-def main():
+def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     command = args.command or "list"
@@ -265,12 +267,14 @@ def main():
     sessions = list_sessions_filesystem(cwd)
 
     if command == "list":
-        # Enrich with cost data for the list table
-        for s in sessions:
-            s["total_cost"] = get_session_total_cost(s["file"])
-        if verbose:
+        if verbose or not sys.stdout.isatty():
+            for s in sessions:
+                enrich_session(s)
             cmd_list(sessions, verbose)
         else:
+            # Deferred: keeps textual out of non-TUI commands.
+            from claudetool.tui import run_interactive  # noqa: PLC0415
+
             run_interactive(sessions, cwd)
     elif command == "preview":
         cmd_preview(sessions, args)
@@ -280,10 +284,6 @@ def main():
         cmd_search(sessions, args)
     elif command == "stats":
         cmd_stats(sessions, args)
-    else:
-        for s in sessions:
-            s["total_cost"] = get_session_total_cost(s["file"])
-        run_interactive(sessions, cwd)
 
 
 if __name__ == "__main__":

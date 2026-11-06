@@ -7,15 +7,27 @@ under ``<config dir>/projects/<encoded-path>/``
 no argparse, and no template data.
 """
 
+from __future__ import annotations
+
+import json
 import os
 import re
-import json
 import shutil
-from pathlib import Path
-from datetime import datetime
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path  # noqa: TC003
+from typing import Any, TypedDict
 
+from claudetool._cache import load_summary, store_summary
 from claudetool.rendering import RED, RESET
 from claudetool.templates import claude_config_dir
+from claudetool.transcript import Kind, parse_entries, parse_transcript
+
+_TAIL_WINDOWS = (256 * 1024, 4 * 1024 * 1024)
+_HEAD_BYTES = 2 * 1024 * 1024
+_LABEL_CHARS = 80
+_BRANCH_RE = re.compile(rb'"gitBranch":\s*"([^"]*)"')
 
 
 # ─────────────────────────────────────────────
@@ -34,179 +46,194 @@ def get_project_sessions_dir(cwd: str | None = None) -> Path:
 
 
 # ─────────────────────────────────────────────
-# Session-level parsing
+# Listing
 # ─────────────────────────────────────────────
 
 
-def parse_session_file(session_file: Path) -> dict:
-    first_user_msg = None
-    custom_title = None
-    last_timestamp = None
-    total_lines = 0
+class Session(TypedDict):
+    """One session as listed; `prompt_count` and `total_cost` fill in lazily."""
 
-    try:
-        with open(session_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                total_lines += 1
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+    session_id: str
+    file: Path
+    last_active: datetime
+    custom_title: str | None
+    label: str
+    git_branch: str
+    file_size_kb: float
+    subagent_count: int
+    prompt_count: int | None
+    total_cost: float | None
 
-                if entry.get("type") == "custom-title":
-                    title = entry.get("customTitle", "").strip()
-                    if title:
-                        custom_title = title
 
-                ts = entry.get("timestamp") or entry.get("ts")
-                if ts:
-                    last_timestamp = ts
+@dataclass(frozen=True, slots=True)
+class Subagent:
+    """A subagent transcript owned by a session."""
 
-                if first_user_msg is None:
-                    role = entry.get("role") or entry.get("type")
-                    content = entry.get("message", {}).get("content") or entry.get(
-                        "content", ""
-                    )
-                    if role in ("human", "user"):
-                        if isinstance(content, str):
-                            first_user_msg = content.strip()
-                        elif isinstance(content, list):
-                            for block in content:
-                                if (
-                                    isinstance(block, dict)
-                                    and block.get("type") == "text"
-                                ):
-                                    first_user_msg = block.get("text", "").strip()
-                                    break
+    agent_id: str
+    file: Path
+    description: str
+    agent_type: str
+    model: str
 
-    except (IOError, PermissionError) as e:
-        print(f"  [warn] Could not read {session_file.name}: {e}")
 
-    created_at = None
-    if last_timestamp:
+def _tail_summary(path: Path) -> tuple[str | None, str]:
+    """Return the last custom title and git branch found near the file end."""
+    size = path.stat().st_size
+    title: str | None = None
+    branch = ""
+    with path.open("rb") as fh:
+        for window in _TAIL_WINDOWS:
+            offset = max(0, size - window)
+            fh.seek(offset)
+            lines = fh.read().split(b"\n")
+            if offset:
+                lines = lines[1:]
+            if not branch:
+                branch = _last_branch(lines)
+            title = _last_title(lines)
+            if title is not None or offset == 0:
+                break
+    return title, branch
+
+
+def _last_branch(lines: list[bytes]) -> str:
+    for line in reversed(lines):
+        found = _BRANCH_RE.search(line)
+        if found:
+            return found.group(1).decode("utf-8", "replace")
+    return ""
+
+
+def _last_title(lines: list[bytes]) -> str | None:
+    for line in reversed(lines):
+        if b"custom-title" not in line:
+            continue
         try:
-            if isinstance(last_timestamp, (int, float)):
-                created_at = datetime.fromtimestamp(last_timestamp / 1000)
-            else:
-                created_at = datetime.fromisoformat(
-                    str(last_timestamp).replace("Z", "+00:00")
-                )
-        except Exception:
-            pass
-    if not created_at:
-        created_at = datetime.fromtimestamp(session_file.stat().st_mtime)
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get("type") == "custom-title":
+            title = str(entry.get("customTitle", "")).strip()
+            if title:
+                return title
+    return None
 
-    label = custom_title or (first_user_msg or "")[:80]
 
-    # Lazy-load cost — computed on first access via stats module
+def _first_prompt(path: Path) -> str:
+    """Return the first user message, decoding only the head of the file."""
+    with path.open("rb") as fh:
+        head = fh.read(_HEAD_BYTES)
+    lines = head.split(b"\n")
+    if len(head) == _HEAD_BYTES:
+        lines.pop()
+    entries: list[dict[str, Any]] = []
+    for line in lines:
+        if b'"user"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    for block in parse_entries(entries):
+        if block.kind is Kind.USER:
+            return " ".join(block.text.split())[:_LABEL_CHARS]
+    return ""
+
+
+def _subagent_files(session_file: Path) -> list[Path]:
+    root = session_file.with_suffix("") / "subagents"
+    return sorted(root.glob("**/agent-*.jsonl")) if root.is_dir() else []
+
+
+def _summarize(session_file: Path) -> Session:
+    stat = session_file.stat()
+    title, branch = _tail_summary(session_file)
     return {
         "session_id": session_file.stem,
         "file": session_file,
-        "created_at": created_at,
-        "message_count": total_lines,
-        "custom_title": custom_title,
-        "label": label,
-        "file_size_kb": round(session_file.stat().st_size / 1024, 1),
-        "total_cost": None,  # populated by enrich_with_costs()
+        "last_active": datetime.fromtimestamp(stat.st_mtime),  # noqa: DTZ006
+        "custom_title": title,
+        "label": title or _first_prompt(session_file),
+        "git_branch": branch,
+        "file_size_kb": round(stat.st_size / 1024, 1),
+        "subagent_count": len(_subagent_files(session_file)),
+        "prompt_count": None,
+        "total_cost": None,
     }
 
 
-def list_sessions_filesystem(cwd: str | None = None) -> list[dict]:
+def list_sessions_filesystem(cwd: str | None = None) -> list[Session]:
+    """List the project's sessions, newest first, without parsing whole files."""
     sessions_dir = get_project_sessions_dir(cwd)
     if not sessions_dir.exists():
         print(f"No sessions directory found at: {sessions_dir}")
         return []
-    session_files = sorted(
-        sessions_dir.glob("*.jsonl"),
-        key=lambda f: f.stat().st_mtime,
-        reverse=True,
+    files = sorted(
+        sessions_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True
     )
-    return [parse_session_file(f) for f in session_files]
+    return [_summarize(f) for f in files]
 
 
-# ─────────────────────────────────────────────
-# Message-level parsing  (for preview)
-# ─────────────────────────────────────────────
+def _signature(session_file: Path) -> str:
+    stat = session_file.stat()
+    subs = [f.stat().st_mtime_ns for f in _subagent_files(session_file)]
+    return f"{stat.st_mtime_ns}:{stat.st_size}:{len(subs)}:{max(subs, default=0)}"
 
 
-def _extract_text(content) -> str:
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if not isinstance(block, dict):
-                continue
-            btype = block.get("type", "")
-            if btype == "text":
-                parts.append(block.get("text", "").strip())
-            elif btype == "tool_use":
-                name = block.get("name", "tool")
-                inp = block.get("input", {})
-                brief = json.dumps(inp, ensure_ascii=False)[:120]
-                parts.append(f"[tool_use: {name}] {brief}")
-            elif btype == "tool_result":
-                inner = block.get("content", "")
-                brief = _extract_text(inner)[:120]
-                parts.append(f"[tool_result] {brief}")
-        return "\n".join(p for p in parts if p)
-    return ""
+def enrich_session(session: Session) -> None:
+    """Fill `prompt_count` and `total_cost`, reusing the cache when unchanged."""
+    # Deferred: stats imports this module.
+    from claudetool.stats import session_cost  # noqa: PLC0415
+
+    path = session["file"]
+    key, sig = str(path), _signature(path)
+    cached = load_summary(key, sig)
+    if cached is None:
+        blocks = parse_transcript(path)
+        count = sum(b.kind is Kind.USER for b in blocks)
+        cost = session_cost(path)
+        store_summary(key, sig, prompt_count=count, total_cost=cost)
+    else:
+        count, cost = cached["prompt_count"], cached["total_cost"]
+    session["prompt_count"] = count
+    session["total_cost"] = cost
 
 
-def parse_messages(session_file: Path) -> list[dict]:
-    messages = []
+def _read_meta(agent_file: Path) -> dict[str, Any]:
+    meta = agent_file.with_suffix(".meta.json")
     try:
-        with open(session_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+        data = json.loads(meta.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
-                etype = entry.get("type", "")
-                if etype in ("custom-title", "summary"):
-                    continue
 
-                role = entry.get("role") or etype
-                if role not in ("human", "user", "assistant"):
-                    continue
+def list_subagents(session_file: Path) -> list[Subagent]:
+    """List the session's subagents, oldest first; missing metadata reads as empty."""
+    files = sorted(_subagent_files(session_file), key=lambda f: f.stat().st_mtime)
+    result = []
+    for f in files:
+        meta = _read_meta(f)
+        result.append(
+            Subagent(
+                agent_id=f.stem.removeprefix("agent-"),
+                file=f,
+                description=str(meta.get("description", "")),
+                agent_type=str(meta.get("agentType", "")),
+                model=str(meta.get("model", "")),
+            )
+        )
+    return result
 
-                ts = entry.get("timestamp") or entry.get("ts")
-                when = None
-                if ts:
-                    try:
-                        if isinstance(ts, (int, float)):
-                            when = datetime.fromtimestamp(ts / 1000)
-                        else:
-                            when = datetime.fromisoformat(
-                                str(ts).replace("Z", "+00:00")
-                            )
-                    except Exception:
-                        pass
 
-                content = entry.get("message", {}).get("content") or entry.get(
-                    "content", ""
-                )
-                text = _extract_text(content)
-                if not text:
-                    continue
-
-                messages.append(
-                    {
-                        "role": "user" if role in ("human", "user") else "assistant",
-                        "when": when,
-                        "text": text,
-                    }
-                )
-    except (IOError, PermissionError) as e:
-        print(f"[warn] {e}")
-    return messages
+def subagent_file(session_file: Path, agent_id: str) -> Path | None:
+    """Return the transcript of subagent `agent_id`, if it exists."""
+    for sub in list_subagents(session_file):
+        if sub.agent_id == agent_id:
+            return sub.file
+    return None
 
 
 # ─────────────────────────────────────────────
@@ -219,46 +246,48 @@ def confirm(prompt: str) -> bool:
     return ans in ("y", "yes")
 
 
-def delete_sessions(sessions: list[dict], dry_run: bool = False) -> int:
+def delete_session_files(session_file: Path) -> None:
+    """Remove a session transcript and its sibling subagent/tool-result dir."""
+    session_file.unlink()
+    shutil.rmtree(session_file.with_suffix(""), ignore_errors=True)
+
+
+def delete_sessions(sessions: list[Session], dry_run: bool = False) -> int:
     deleted = 0
     for s in sessions:
-        path: Path = s["file"]
-        # Per-session artifacts (tool-results, etc.) live in a sibling <session_id>/ dir
+        path = s["file"]
         side_dir = path.with_suffix("")
         label = s["custom_title"] or s["session_id"]
         suffix = f" + {side_dir.name}/" if side_dir.is_dir() else ""
         if dry_run:
             print(f"  [dry-run] Would delete: {label}  ({path.name}{suffix})")
-        else:
-            try:
-                path.unlink()
-                shutil.rmtree(side_dir, ignore_errors=True)
-                print(f"  {RED}Deleted{RESET}: {label}  ({path.name}{suffix})")
-                deleted += 1
-            except OSError as e:
-                print(f"  [error] Could not delete {path.name}: {e}")
+            continue
+        try:
+            delete_session_files(path)
+        except OSError as e:
+            print(f"  [error] Could not delete {path.name}: {e}")
+            continue
+        print(f"  {RED}Deleted{RESET}: {label}  ({path.name}{suffix})")
+        deleted += 1
     return deleted
 
 
-def rename_session(session: dict, new_title: str) -> None:
+def rename_session(session: Session, new_title: str) -> None:
     """Append a custom-title entry to the session JSONL and update the dict in-place."""
-    import uuid as _uuid
-
     entry = {
         "type": "custom-title",
         "customTitle": new_title.strip(),
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "uuid": str(_uuid.uuid4()),
+        "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "uuid": str(uuid.uuid4()),
         "sessionId": session["session_id"],
     }
-    path: Path = session["file"]
-    with open(path, "a", encoding="utf-8") as f:
+    with session["file"].open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     session["custom_title"] = new_title.strip()
     session["label"] = new_title.strip()
 
 
-def resolve_targets(sessions: list[dict], ids_or_titles: list[str]) -> list[dict]:
+def resolve_targets(sessions: list[Session], ids_or_titles: list[str]) -> list[Session]:
     targets = []
     needles = [t.lower() for t in ids_or_titles]
     for s in sessions:
