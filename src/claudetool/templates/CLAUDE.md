@@ -97,6 +97,10 @@ Conventions for Python; apply the spirit to other languages. Match an existing f
 ## 9. Subagents
 
 - For complex, multi-step work (code + test + integrate, many changes across files), prefer coordinating subagents to complete the task.
-- Model choice: simple task → Sonnet; complex task → Fable. Choose effort yourself; don't overuse high effort.
+- Use only Haiku, Sonnet, or Opus, and always pass `model` explicitly: an omitted model and every `fork` inherit the parent's model. Never Fable.
+- Pick model and effort per subtask (when unsure, one tier up):
+  - Haiku · low: lookups, grep, listing, mechanical edits (rename, format).
+  - Sonnet · medium (high for tangled logic): a change within one module, writing tests, fixing a bug with a known cause.
+  - Opus · high (xhigh/max only when the user asks): design, cross-module changes, bugs of unknown cause, review.
 - In subagent prompts, ask for tool calls until the task is done and a single final report; discourage intermediate text output, which adds little value.
-- At most 4 subagents at a time. Subagents must not spawn further subagents.
+- At most 6 subagents at a time. Subagents must not spawn further subagents.
