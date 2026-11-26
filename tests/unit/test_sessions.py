@@ -10,6 +10,7 @@ from claudetool.sessions import (
     delete_session_files,
     list_sessions_filesystem,
     list_subagents,
+    rename_session,
     subagent_file,
 )
 
@@ -100,3 +101,19 @@ def test_delete_session_files_removes_sibling_dir(proj: Path) -> None:
     delete_session_files(session)
     assert not session.exists()
     assert not (proj / "s").exists()
+
+
+def test_rename_session_sets_resume_title_and_prompt_footer_name(proj: Path) -> None:
+    write_jsonl(proj / "s.jsonl", [_title("old"), user("hello")])
+    [s] = list_sessions_filesystem("/p")
+
+    rename_session(s, "  new name ")
+
+    lines = (proj / "s.jsonl").read_text(encoding="utf-8").splitlines()
+    tail = [json.loads(line) for line in lines[-2:]]
+    assert [(e["type"], e.get("customTitle") or e.get("agentName")) for e in tail] == [
+        ("custom-title", "new name"),
+        ("agent-name", "new name"),
+    ]
+    assert all(e["sessionId"] == s["session_id"] for e in tail)
+    assert (s["custom_title"], s["label"]) == ("new name", "new name")
