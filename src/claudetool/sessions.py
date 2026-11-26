@@ -273,7 +273,7 @@ def delete_sessions(sessions: list[Session], dry_run: bool = False) -> int:
 
 
 def rename_session(session: Session, new_title: str) -> None:
-    """Append a custom-title entry to the session JSONL and update the dict in-place."""
+    """Append title entries to the session JSONL and update the dict in-place."""
     entry = {
         "type": "custom-title",
         "customTitle": new_title.strip(),
@@ -281,8 +281,16 @@ def rename_session(session: Session, new_title: str) -> None:
         "uuid": str(uuid.uuid4()),
         "sessionId": session["session_id"],
     }
+    # Claude Code's `/rename` writes both: `claude -r` lists `customTitle`, while
+    # the prompt footer of a resumed session shows `agentName`.
+    name = {
+        "type": "agent-name",
+        "agentName": new_title.strip(),
+        "sessionId": session["session_id"],
+    }
     with session["file"].open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        for e in (entry, name):
+            f.write(json.dumps(e, ensure_ascii=False) + "\n")
     session["custom_title"] = new_title.strip()
     session["label"] = new_title.strip()
 
